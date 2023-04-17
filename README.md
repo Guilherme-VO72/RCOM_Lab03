@@ -1,2 +1,2 @@
 # RCOM_Lab02
-Data Link Program
+Data Link Protocol
