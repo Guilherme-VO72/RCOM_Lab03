@@ -1,8 +1,17 @@
 #include "datalinklayer.c"
+#include <stdio.h>
 
 int main(int argc, char** argv){
-    
-    if(llopen(argv[1], TRANSMITTER) != -1){
+
+    linkLayer con;
+    strcpy(con.serialPort, argv[1]);
+    con.baudRate = BAUDRATE_DEFAULT;
+    con.numTries = 5;
+    con.timeOut = 1;
+    con.role = TRANSMITTER;
+
+    int r = llopen(con);
+    if(r != -1){
         printf("\n\nOK\n\n");
     }    
     return 0;
