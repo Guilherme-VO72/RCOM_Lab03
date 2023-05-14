@@ -13,6 +13,7 @@ int main(int argc, char** argv){
     int r = llopen(con);
     if(r != -1){
         printf("\n\nOK\n\n");
+        llwrite("Hello World", 12);
     }    
     return 0;
 }

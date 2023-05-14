@@ -11,7 +11,7 @@
 #include <time.h>
 
 int fT; 
-int frameCounter, fdr;
+int byteCounter, fdr, nT, timeout;
 struct termios oldtio,newtio;
 volatile int STOP=FALSE;
 
@@ -39,6 +39,8 @@ int stAlarm(int timeout, int tries)
 int llopen(linkLayer connectionParameters){
     DLRole role;
 
+    nT = connectionParameters.numTries;
+    timeout = connectionParameters.timeOut;
     if (connectionParameters.role == 0){
         role = tx;
     }
@@ -110,7 +112,7 @@ int llopen(linkLayer connectionParameters){
         frbuf[3] = 0x01 ^ 0x03;
         frbuf[4] = 0x5C;
         fT = 1;
-
+        
 
         while(acounter < connectionParameters.numTries){
 
@@ -231,4 +233,91 @@ int llopen(linkLayer connectionParameters){
     }
 
     return fdr;
+}
+
+int llwrite(char* buf, int bufSize){
+    //Should be working (impossivel testar 4now pq falta resposta por parte do receiver), not tested. TO BE FINISHED!!!
+
+    printf("\n____LLWRITE____\n");
+
+    //for now no message beyond 1000-6 bytes
+    if(bufSize > 994){
+        printf("Too big, sry.\n");
+        return -1;
+    }
+
+    unsigned char bcc2 = 0x00, frame[1000] = {0}, fresp[5] = {0};
+    //BCC calculation
+    for (int i = 0; i<bufSize; i++){
+        bcc2 = bcc2 ^ buf[i];
+    }
+
+    frame[0] = 0x5C;
+    frame[1] = 0x01;
+    frame[2] = 0x00;
+    frame[3] = frame[1] ^ frame[2];
+
+    int j=4;
+    for(int i = 0; i<bufSize; i++){
+        frame[j] = buf[i];
+        j++;
+    }
+
+    frame[j] = bcc2;
+    frame[j+1] = 0x5C;
+
+    acounter = 0;
+    aflag = 1;
+    byteCounter=0;
+
+    while(acounter < nT){
+
+        if(aflag){
+            int rb = write(fdr, frame, sizeof(frame));
+            byteCounter += rb;
+            printf("I FRAME SENT, %d bytes were written.\n", rb);
+            stAlarm(timeout, nT);
+        }
+            
+
+        int rr = read(fdr, fresp, 5);
+        if(rr != -1 && fresp[0] == 0x5C){
+            if(fresp[1] != 0x01 || fresp[2] != 0x21 || fresp[3] != (fresp[1] ^ fresp[2])){
+                printf("RR is wrong - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
+                pause();
+            }
+            else{
+                printf("RR correctly recieved - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
+                break;
+            }
+        }
+        else if (rr == -1){
+            printf("Waiting.\n");
+            pause();
+        }
+
+
+    }
+
+    if(acounter >= nT){
+        printf("Alarm reached max number of tries.\n");
+        return -1;
+    }
+
+    if(byteCounter < 1){
+        return -1;
+    } else { return 0; }
+}
+
+int llclose(int showStatistics){
+    
+    //can't use byteCounter para total de bytes, adaptar quando fizer transmissao de + do q 1 frame I
+
+    // can't really do without knowing role, perguntar na aula
+    // Se eu der disconnect de um lado como é que dou do outro? É suposto admitir que só o transmissor inicia disconnects?
+    // Also, caso seja, dou close do lado do receiver no llread?
+    // To be done later depois de falar com a prof.
+    
+    
+    return 0;
 }
