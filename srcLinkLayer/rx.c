@@ -9,10 +9,17 @@ int main(int argc, char** argv){
     con.numTries = 5;
     con.timeOut = 1;
     con.role = RECEIVER;
+    char packet[1000];
 
     int r = llopen(con);
     if(r != -1){
         printf("\n\nOK\n\n");
+        int rb = llread(packet);
+        if(rb != -1){
+            for (int i = 0; i<rb; i++){
+                printf("0x%02x\n",packet[i]);
+            }
+        }
     }    
     return 0;
 }

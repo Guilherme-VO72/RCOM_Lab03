@@ -9,11 +9,12 @@
 #include <math.h>
 #include <stdio.h>
 #include <time.h>
+#include <stdbool.h>
 
 int fT; 
 int byteCounter, fdr, nT, timeout;
 struct termios oldtio,newtio;
-volatile int STOP=FALSE;
+bool STOP=FALSE;
 
 void halarm(int signal)
 {
@@ -48,7 +49,6 @@ int llopen(linkLayer connectionParameters){
         role = rx;
     }
     else {
-        //perror(flag);
         return (-1);
     }
 
@@ -81,7 +81,7 @@ int llopen(linkLayer connectionParameters){
     // Set input mode (non-canonical, no echo,...)
     newtio.c_lflag = 0;
     newtio.c_cc[VTIME] = 0; // Inter-character timer unused
-    newtio.c_cc[VMIN] = 5;  // Blocking read until 5 chars received
+    newtio.c_cc[VMIN] = 1;  // Blocking read until 1 chars received
 
     // VTIME e VMIN should be changed in order to protect with a
     // timeout the reception of the following character(s)
@@ -135,8 +135,7 @@ int llopen(linkLayer connectionParameters){
                 }
             }
             else if (rr == -1){
-                printf("Waiting.\n");
-                pause();
+                //printf("Waiting.\n");
             }
 
 
@@ -269,13 +268,17 @@ int llwrite(char* buf, int bufSize){
     acounter = 0;
     aflag = 1;
     byteCounter=0;
+    
 
     while(acounter < nT){
 
         if(aflag){
-            int rb = write(fdr, frame, sizeof(frame));
+            int rb = write(fdr, frame, j+2);
             byteCounter += rb;
             printf("I FRAME SENT, %d bytes were written.\n", rb);
+            for (int i = 0; i<j+2; i++){
+                printf("0x%02x\n",frame[i]);
+            }
             stAlarm(timeout, nT);
         }
             
@@ -284,7 +287,6 @@ int llwrite(char* buf, int bufSize){
         if(rr != -1 && fresp[0] == 0x5C){
             if(fresp[1] != 0x01 || fresp[2] != 0x21 || fresp[3] != (fresp[1] ^ fresp[2])){
                 printf("RR is wrong - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
-                pause();
             }
             else{
                 printf("RR correctly recieved - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
@@ -292,8 +294,7 @@ int llwrite(char* buf, int bufSize){
             }
         }
         else if (rr == -1){
-            printf("Waiting.\n");
-            pause();
+            //printf("Waiting.\n");
         }
 
 
@@ -306,7 +307,127 @@ int llwrite(char* buf, int bufSize){
 
     if(byteCounter < 1){
         return -1;
-    } else { return 0; }
+    } else { return bufSize;}
+}
+
+int llread(char* packet){
+
+    printf("\n____LLREAD____\n");
+    //printf("\n%d\n", fdr);
+
+    unsigned char suframe[5] = {0}, iframe[1000] = {0}, bcc2 = 0x00, flagDetector[1] = {0}, fsize = 0, buf[5] = {0};
+    bool detect = TRUE, chunkread = FALSE;
+    STOP = FALSE;
+    
+    unsigned char reb[5] = {0};
+    DLSM sm = START;
+    int to_read =1;
+
+    while(STOP == FALSE){
+        if(detect){
+            int rb = read(fdr, reb, 1);
+            //printf("%d bytes lidos\n", rb);
+            if (rb <= 0) continue;
+        }
+
+
+        switch (sm){
+            case START:
+                if(reb[0] == 0x5C){
+                    sm = FLAG_RCV;
+                    iframe[fsize++] = reb[0];
+                }
+                break;
+
+            case FLAG_RCV:
+                if(reb[0] == 0x01){
+                    sm = ADD_RCV;
+                    iframe[fsize++] = reb[0];
+                }
+                else if(reb[0] == 0x5C){
+                    sm = FLAG_RCV;
+                    fsize = 1;
+                }
+                else{
+                    sm = START;
+                    fsize = 0;
+                }
+                break;
+
+            case ADD_RCV:
+                if(reb[0] == 0x00){
+                    sm = C_RCV;
+                    iframe[fsize++] = reb[0];
+                }
+                else if(reb[0] == 0x5C){
+                    sm = FLAG_RCV;
+                    fsize = 1;
+                }
+                else{
+                    sm = START;
+                    fsize = 0;
+                }
+                break;
+
+            case C_RCV:
+                if(reb[0] == (0x01 ^ 0x00)){
+                    sm = BCC_OK;
+                    iframe[fsize++] = reb[0];
+                }
+                else if(reb[0] == 0x5C){
+                    sm = FLAG_RCV;
+                    fsize = 1;
+                }
+                else{
+                    sm = START;
+                    fsize = 0;
+                }
+                break;
+
+            case BCC_OK:
+                if(reb[0] == 0x5C){
+                    STOP = TRUE;
+                    iframe[fsize++] = reb[0];
+                }
+                else{
+                    iframe[fsize++] = reb[0];
+                }
+                break;
+        }
+
+    }
+
+    for(int i = 4; i<fsize-2;i++){
+        bcc2 = bcc2 ^ iframe[i];
+    }
+
+    if(bcc2 != iframe[fsize - 2]){
+        suframe[0] = 0x5C;
+        suframe[1] = 0x01;
+        suframe[2] = 0x02;
+        suframe[3] = suframe[1] ^ suframe[2];
+        suframe[4] = 0x5C;
+        int wb = write(fdr, suframe, 5);
+        return -1;
+    }
+
+    int datasize = (fsize - 6);
+    //packet = malloc(sizeof(char) * datasize);
+    for(int i = 0; i< datasize; i++){
+        packet[i] = iframe[i+4];
+    }  
+
+    suframe[0] = 0x5C;
+    suframe[1] = 0x01;
+    suframe[2] = 0x21;
+    suframe[3] = suframe[1] ^ suframe[2];
+    suframe[4] = 0x5C;
+
+    printf("I FRAME CORRECTLY RECEIVED. RR SENT - 0x%02x%02x%02x%02x%02x\n",suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
+
+    int wb = write(fdr, suframe, 5);
+
+    return datasize;
 }
 
 int llclose(int showStatistics){
