@@ -55,7 +55,7 @@ int llclose(int showStatistics);
 
 typedef enum{
     tx,
-    rx,
+    rx
 } DLRole;
 
 typedef enum{
@@ -64,7 +64,15 @@ typedef enum{
     ADD_RCV,
     C_RCV,
     BCC_OK,
-    SMSTOP,
+    SMSTOP
 } DLSM;
+
+typedef enum{
+    WFLAG,
+    ADD,
+    CONTROL,
+    BCC1,
+    FRAMEDATA
+} READSM;
 
 #endif

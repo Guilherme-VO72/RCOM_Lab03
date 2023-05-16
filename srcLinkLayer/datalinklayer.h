@@ -64,7 +64,8 @@ typedef enum{
     ADD_RCV,
     C_RCV,
     BCC_OK,
-    SMSTOP
+    SMSTOP,
+    BST
 } DLSM;
 
 typedef enum{

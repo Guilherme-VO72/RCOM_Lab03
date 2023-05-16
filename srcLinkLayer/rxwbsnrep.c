@@ -23,6 +23,22 @@ int main(int argc, char** argv){
             }
             printf("\n");
         }
+        int rbb = llread(packet);
+        if(rbb != -1){
+            printf("\n\n____PACKET RECEIVED FROM LINK LAYER____\n0x");
+            for (int i = 0; i<rbb; i++){
+                printf("%02x",packet[i]);
+            }
+            printf("\n");
+        }
+        int rbbb = llread(packet);
+        if(rbbb != -1){
+            printf("\n\n____PACKET RECEIVED FROM LINK LAYER____\n0x");
+            for (int i = 0; i<rbbb; i++){
+                printf("%02x",packet[i]);
+            }
+            printf("\n");
+        }
     }    
     return 0;
 }

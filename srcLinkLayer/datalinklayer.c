@@ -13,8 +13,10 @@
 
 int fT; 
 int byteCounter, fdr, nT, timeout;
+long long totalbwr=0, totalbrd=0;
 struct termios oldtio,newtio;
 bool STOP=FALSE;
+unsigned char lastNr = 0x20, expectedNs = 0x00, lastNs=0x00, expectedNr = 0x20;
 
 void halarm(int signal)
 {
@@ -240,26 +242,36 @@ int llwrite(char* buf, int bufSize){
     printf("\n____LLWRITE____\n");
 
     //for now no message beyond 1000-6 bytes
-    if(bufSize > 994){
-        printf("Too big, sry.\n");
+    if(bufSize > 1000){
+        printf("Buffer too big, sry.\n");
         return -1;
     }
 
-    unsigned char bcc2 = 0x00, frame[1000] = {0}, fresp[5] = {0};
-    //BCC calculation
-    for (int i = 0; i<bufSize; i++){
-        bcc2 = bcc2 ^ buf[i];
-    }
+    unsigned char bcc2 = 0x00, frame[2048] = {0}, fresp[5] = {0};
+    
 
     frame[0] = 0x5C;
     frame[1] = 0x01;
-    frame[2] = 0x00;
+    frame[2] = 0x00 ^ lastNs;
     frame[3] = frame[1] ^ frame[2];
 
     int j=4;
+
+    //BCC2 calc and byte stuffing, o BCC2 é calculado com os dados originais do buf llread alterado em concordância (na aula tinha feito BCC2 com byte stuffing)
+
     for(int i = 0; i<bufSize; i++){
-        frame[j] = buf[i];
-        j++;
+        bcc2 = bcc2 ^ buf[i];
+        if(buf[i] == 0x5C){
+            frame[j++] = 0x5D;      
+            frame[j++] = 0x7C;       
+        }
+        else if(buf[i] == 0x5D){
+            frame[j++] = 0x5D;
+            frame[j++] = 0x7D;           
+        }
+        else{
+            frame[j++] = buf[i];
+        }
     }
 
     frame[j] = bcc2;
@@ -275,18 +287,25 @@ int llwrite(char* buf, int bufSize){
         if(aflag){
             int rb = write(fdr, frame, j+2);
             byteCounter += rb;
-            printf("I FRAME SENT, %d bytes were written.\n", rb);
+            printf("I FRAME SENT, %d bytes were written.\n0x", rb);
             for (int i = 0; i<j+2; i++){
-                printf("0x%02x\n",frame[i]);
+                printf("%02x",frame[i]);
             }
+            printf("\n");
             stAlarm(timeout, nT);
         }
             
 
         int rr = read(fdr, fresp, 5);
         if(rr != -1 && fresp[0] == 0x5C){
-            if(fresp[1] != 0x01 || fresp[2] != 0x21 || fresp[3] != (fresp[1] ^ fresp[2])){
-                printf("RR is wrong - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
+            if(fresp[1] != 0x01 || fresp[2] != (0x01 ^ expectedNr) || fresp[3] != (fresp[1] ^ fresp[2])){
+                if(fresp[2] == (0x05 ^ expectedNr) && fresp[3] == (fresp[1] ^ fresp[2])){
+                    printf("REJ correctly recieved, error writing - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
+                    stAlarm(0.1, nT);
+                }
+                else{
+                    printf("RR is wrong, trying again - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
+                }
             }
             else{
                 printf("RR correctly recieved - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
@@ -307,7 +326,13 @@ int llwrite(char* buf, int bufSize){
 
     if(byteCounter < 1){
         return -1;
-    } else { return bufSize;}
+    } else { 
+        lastNs = lastNs ^ 0x02;
+        printf("0x%02x", lastNs);
+        expectedNr = expectedNr ^ 0x20;
+        totalbwr += byteCounter;
+        return bufSize;
+    }
 }
 
 int llread(char* packet){
@@ -315,117 +340,144 @@ int llread(char* packet){
     printf("\n____LLREAD____\n");
     //printf("\n%d\n", fdr);
 
-    unsigned char suframe[5] = {0}, iframe[1000] = {0}, bcc2 = 0x00, flagDetector[1] = {0}, fsize = 0, buf[5] = {0};
-    bool detect = TRUE, chunkread = FALSE;
+    unsigned char suframe[5] = {0}, iframe[2048] = {0}, bcc2 = 0x00, fsize = 0;
+    bool detect = TRUE, chunkread = FALSE, tryingtoread = TRUE; 
     STOP = FALSE;
-    
+    int rb, testb=0;
+    int datasize;
+
     unsigned char reb[5] = {0};
     DLSM sm = START;
     int to_read =1;
+    while(tryingtoread){
+        while(STOP == FALSE){
+            if(detect){
+                int rb = read(fdr, reb, 1);
+                //printf("%d bytes lidos, total - %d, sm = %d\n", rb, ++testb, sm);
+                if (rb <= 0) continue;
+            }
 
-    while(STOP == FALSE){
-        if(detect){
-            int rb = read(fdr, reb, 1);
-            //printf("%d bytes lidos\n", rb);
-            if (rb <= 0) continue;
+
+            switch (sm){
+                case START:
+                    if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                        iframe[fsize++] = reb[0];
+                    }
+                    break;
+
+                case FLAG_RCV:
+                    if(reb[0] == 0x01){
+                        sm = ADD_RCV;
+                        iframe[fsize++] = reb[0];
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                        fsize = 1;
+                    }
+                    else{
+                        sm = START;
+                        fsize = 0;
+                    }
+                    break;
+
+                case ADD_RCV:
+                    if(reb[0] == expectedNs){
+                        sm = C_RCV;
+                        iframe[fsize++] = reb[0];
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                        fsize = 1;
+                    }
+                    else{
+                        sm = START;
+                        fsize = 0;
+                    }
+                    break;
+
+                case C_RCV:
+                    if(reb[0] == (0x01 ^ expectedNs)){
+                        sm = BCC_OK;
+                        iframe[fsize++] = reb[0];
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                        fsize = 1;
+                    }
+                    else{
+                        sm = START;
+                        fsize = 0;
+                    }
+                    break;
+
+                case BCC_OK:
+                    if(reb[0] == 0x5C){
+                        STOP = TRUE;
+                        iframe[fsize++] = reb[0];
+                    }
+                    else{
+                        iframe[fsize++] = reb[0];
+                    }
+                    break;
+            }
+
         }
 
+        datasize=0;
+        
+        for(int i = 4; i < (fsize-2) ; i++){
+            if(iframe[i] == 0x5D && iframe[i+1] == 0x7C){
+                packet[datasize++] = 0x5C;
+                bcc2 = bcc2 ^ 0x5C;
+                i++;
+                continue;
+            }
+            else if(iframe[i] == 0x5D && iframe[i+1] == 0x7D){
+                packet[datasize++] = 0x5D;
+                bcc2 = bcc2 ^ 0x5D;
+                i++;
+                continue;
+            }
+            else{
+                packet[datasize++] = iframe[i];
+                bcc2 = bcc2 ^ iframe[i];
+            }
 
-        switch (sm){
-            case START:
-                if(reb[0] == 0x5C){
-                    sm = FLAG_RCV;
-                    iframe[fsize++] = reb[0];
-                }
-                break;
-
-            case FLAG_RCV:
-                if(reb[0] == 0x01){
-                    sm = ADD_RCV;
-                    iframe[fsize++] = reb[0];
-                }
-                else if(reb[0] == 0x5C){
-                    sm = FLAG_RCV;
-                    fsize = 1;
-                }
-                else{
-                    sm = START;
-                    fsize = 0;
-                }
-                break;
-
-            case ADD_RCV:
-                if(reb[0] == 0x00){
-                    sm = C_RCV;
-                    iframe[fsize++] = reb[0];
-                }
-                else if(reb[0] == 0x5C){
-                    sm = FLAG_RCV;
-                    fsize = 1;
-                }
-                else{
-                    sm = START;
-                    fsize = 0;
-                }
-                break;
-
-            case C_RCV:
-                if(reb[0] == (0x01 ^ 0x00)){
-                    sm = BCC_OK;
-                    iframe[fsize++] = reb[0];
-                }
-                else if(reb[0] == 0x5C){
-                    sm = FLAG_RCV;
-                    fsize = 1;
-                }
-                else{
-                    sm = START;
-                    fsize = 0;
-                }
-                break;
-
-            case BCC_OK:
-                if(reb[0] == 0x5C){
-                    STOP = TRUE;
-                    iframe[fsize++] = reb[0];
-                }
-                else{
-                    iframe[fsize++] = reb[0];
-                }
-                break;
         }
 
-    }
+        if(bcc2 != iframe[fsize - 2]){
+            suframe[0] = 0x5C;
+            suframe[1] = 0x01;
+            suframe[2] = 0x05 ^ lastNr;
+            suframe[3] = suframe[1] ^ suframe[2];
+            suframe[4] = 0x5C;
+            printf("ERROR DATA NOT CORRECT, BCC2 - 0x%02x - REJ SENT - 0x%02x%02x%02x%02x%02x\n", bcc2, suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
+            int wb = write(fdr, suframe, 5);
+            continue;
+        }
 
-    for(int i = 4; i<fsize-2;i++){
-        bcc2 = bcc2 ^ iframe[i];
+        tryingtoread = FALSE;
     }
-
-    if(bcc2 != iframe[fsize - 2]){
-        suframe[0] = 0x5C;
-        suframe[1] = 0x01;
-        suframe[2] = 0x02;
-        suframe[3] = suframe[1] ^ suframe[2];
-        suframe[4] = 0x5C;
-        int wb = write(fdr, suframe, 5);
-        return -1;
-    }
-
-    int datasize = (fsize - 6);
-    //packet = malloc(sizeof(char) * datasize);
-    for(int i = 0; i< datasize; i++){
-        packet[i] = iframe[i+4];
-    }  
 
     suframe[0] = 0x5C;
     suframe[1] = 0x01;
-    suframe[2] = 0x21;
+    suframe[2] = 0x01 ^ lastNr;
     suframe[3] = suframe[1] ^ suframe[2];
     suframe[4] = 0x5C;
 
     printf("I FRAME CORRECTLY RECEIVED. RR SENT - 0x%02x%02x%02x%02x%02x\n",suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
-
+    printf("0x");
+    for (int i = 0; i<fsize; i++){
+        printf("%02x",iframe[i]);
+    }
+    printf("\n");
+    
     int wb = write(fdr, suframe, 5);
+
+    lastNr = (lastNr ^ 0x20);
+    expectedNs = (expectedNs ^ 0x02);
+    totalbrd += fsize;
 
     return datasize;
 }
