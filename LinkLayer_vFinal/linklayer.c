@@ -11,6 +11,8 @@
 #include <time.h>
 #include <stdbool.h>
 
+#define _POSIX_C_SOURCE 200809L
+
 int fT; 
 int byteCounter, fdr, nT, timeout;
 long long totalbwr=0, totalbrd=0;
@@ -116,7 +118,7 @@ int llopen(linkLayer connectionParameters){
         frbuf[3] = 0x01 ^ 0x03;
         frbuf[4] = 0x5C;
         fT = 1;
-
+        
 
         while(acounter < connectionParameters.numTries){
 
@@ -250,7 +252,9 @@ int llwrite(char* buf, int bufSize){
     }
 
     unsigned char bcc2 = 0x00, frame[2048] = {0}, fresp[5] = {0};
-    
+    //clock_t fr_t, fre, wr_t, wre, s_t, e_t;
+
+    //fr_t = s_t = clock();
 
     frame[0] = 0x5C;
     frame[1] = 0x01;
@@ -286,6 +290,9 @@ int llwrite(char* buf, int bufSize){
     else{
         frame[j++] = bcc2;
     }
+
+    //fre = clock();
+    //printf("Frame creation time - %f\n", (float) (fre-fr_t)/CLOCKS_PER_SEC);
     
     printf("0x%02x\n", bcc2);
     frame[j++] = 0x5C;
@@ -296,18 +303,25 @@ int llwrite(char* buf, int bufSize){
     
 
     while(acounter < nT){
+        //time_t as,ae;
 
         if(aflag){
+            //wr_t = clock();
             int rb = write(fdr, frame, j);
+            //wre = clock();
+            //printf("Write time - %f\n", (float) (wre-wr_t)/CLOCKS_PER_SEC);
             byteCounter += rb;
             printf("I FRAME SENT, %d bytes were written.\n0x", rb);
             /*for (int i = 0; i<j; i++){
                 printf("%02x",frame[i]);
             }
             printf("\n");*/
+            //as=clock();
             stAlarm(timeout, nT);
         }
-            
+        
+        //ae=clock();
+        //printf("Time getting out of alarm - %f\n", (float) (ae-as)/CLOCKS_PER_SEC);
 
         int rr = read(fdr, fresp, 5);
         if(rr != -1 && fresp[0] == 0x5C){
@@ -327,6 +341,8 @@ int llwrite(char* buf, int bufSize){
                 //printf("0x%02x", lastNs);
                 expectedNr = expectedNr ^ 0x20;
                 totalbwr += byteCounter;
+                //e_t = clock();
+                //printf("LLWRITE total time - %f\n", (float) (e_t-s_t)/CLOCKS_PER_SEC);
                 return bufSize;
             }
         }
@@ -349,6 +365,8 @@ int llwrite(char* buf, int bufSize){
         //printf("0x%02x", lastNs);
         expectedNr = expectedNr ^ 0x20;
         totalbwr += byteCounter;
+        //e_t = clock();
+        //printf("LLWRITE total time - %f\n", (float) (e_t-s_t)/CLOCKS_PER_SEC);
         return bufSize;
     }
 }
@@ -364,18 +382,12 @@ int llread(char* packet){
     STOP = FALSE;
     int rb, testb=0;
     int datasize;
+    unsigned char reb[64] = {0};
+    DLSM sm = START;
     int rejcounter = 0;
 
     while(tryingtoread){
-        //unsigned char suframe[5] = {0}, iframe[2048] = {0}, bcc2 = 0x00;
-        //int fsize = 0;
-        //STOP = FALSE;
-        //int rb, testb=0;
-        //int datasize;
 
-        unsigned char reb[5] = {0};
-        DLSM sm = START;
-        int to_read =1;
         while(STOP == FALSE){
             if(detect){
                 rb = read(fdr, reb, 1);
@@ -383,7 +395,7 @@ int llread(char* packet){
                 if (rb <= 0) continue;
             }
             else{
-                rb = read(fdr, reb, 5);
+                rb = read(fdr, reb, 64);
                 //printf("%d bytes lidos, total - %d, sm = %d\n", rb, ++testb, sm);
                 if (rb <= 0) continue;
             }
@@ -448,7 +460,7 @@ int llread(char* packet){
                         if(reb[i] == 0x5C){
                             STOP = TRUE;
                             iframe[fsize++] = reb[i];
-                            i=5;
+                            i=64;
                         }
                         else{
                             iframe[fsize++] = reb[i];
@@ -484,7 +496,7 @@ int llread(char* packet){
             //printf("0x%02x\n", bcc2);
         }
 
-        printf("BB2 calc - 0x%02x\n", bcc2);
+        printf("0x%02x\n", bcc2);
 
         unsigned char bcccheck;
 
