@@ -84,7 +84,7 @@ int main(int argc, char *argv[])
                 break;
             }
 
-            sleep(1);
+            //sleep(1);
         }
         // close connection
         llclose(1);

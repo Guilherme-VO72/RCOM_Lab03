@@ -17,6 +17,7 @@ long long totalbwr=0, totalbrd=0;
 struct termios oldtio,newtio;
 bool STOP=FALSE;
 unsigned char lastNr = 0x20, expectedNs = 0x00, lastNs=0x00, expectedNr = 0x20;
+time_t ts, te;
 
 void halarm(int signal)
 {
@@ -40,6 +41,7 @@ int stAlarm(int timeout, int tries)
 }
 
 int llopen(linkLayer connectionParameters){
+    ts=clock();
     DLRole role;
 
     nT = connectionParameters.numTries;
@@ -114,7 +116,7 @@ int llopen(linkLayer connectionParameters){
         frbuf[3] = 0x01 ^ 0x03;
         frbuf[4] = 0x5C;
         fT = 1;
-        
+
 
         while(acounter < connectionParameters.numTries){
 
@@ -312,7 +314,8 @@ int llwrite(char* buf, int bufSize){
             if(fresp[1] != 0x01 || fresp[2] != (0x01 ^ expectedNr) || fresp[3] != (fresp[1] ^ fresp[2])){
                 if(fresp[2] == (0x05 ^ expectedNr) && fresp[3] == (fresp[1] ^ fresp[2])){
                     printf("REJ correctly recieved, error writing - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
-                    stAlarm(0.1, nT);
+                    alarm(1);
+                    //stAlarm(0.1, nT);
                 }
                 else{
                     printf("RR is wrong, trying again - 0x%02x%02x%02x%02x%02x\n", fresp[0],fresp[1],fresp[2],fresp[3],fresp[4]);
@@ -361,6 +364,7 @@ int llread(char* packet){
     STOP = FALSE;
     int rb, testb=0;
     int datasize;
+    int rejcounter = 0;
 
     while(tryingtoread){
         //unsigned char suframe[5] = {0}, iframe[2048] = {0}, bcc2 = 0x00;
@@ -480,7 +484,7 @@ int llread(char* packet){
             //printf("0x%02x\n", bcc2);
         }
 
-        printf("0x%02x\n", bcc2);
+        printf("BB2 calc - 0x%02x\n", bcc2);
 
         unsigned char bcccheck;
 
@@ -500,8 +504,12 @@ int llread(char* packet){
             suframe[2] = 0x05 ^ lastNr;
             suframe[3] = suframe[1] ^ suframe[2];
             suframe[4] = 0x5C;
+            rejcounter++;
             printf("ERROR DATA NOT CORRECT, BCC2 - 0x%02x - REJ SENT - 0x%02x%02x%02x%02x%02x\n", bcccheck, suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
             int wb = write(fdr, suframe, 5);
+            if(rejcounter >= nT){
+                return -1;
+            }
             STOP = FALSE;
             sm = START;
             detect = TRUE;
@@ -539,6 +547,8 @@ int llread(char* packet){
 }
 
 int llclose(int showStatistics){
+    te=clock();
+    printf("TOTAL TRANSFER TIME - %f\n", (float) (te-ts)/CLOCKS_PER_SEC);
     
     //can't use byteCounter para total de bytes, adaptar quando fizer transmissao de + do q 1 frame I
 
