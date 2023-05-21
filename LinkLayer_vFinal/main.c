@@ -87,7 +87,7 @@ int main(int argc, char *argv[])
             //sleep(1);
         }
         // close connection
-        llclose(1);
+        llclose(ll,1);
         close(file_desc);
         return 0;
     }
@@ -146,7 +146,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        llclose(1);
+        llclose(ll,1);
         close(file_desc);
         return 0;
     }

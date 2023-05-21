@@ -14,18 +14,19 @@
 #define _POSIX_C_SOURCE 200809L
 
 int fT; 
-int byteCounter, fdr, nT, timeout;
-long long totalbwr=0, totalbrd=0;
+int byteCounter, fdr, nT, timeout, totalRetransmissions = 0;
+long long int totalbwr=0, totalbrd=0, totalnumFail, totalnumTrans=0, totalnumReadcalls=0;
 struct termios oldtio,newtio;
 bool STOP=FALSE;
 unsigned char lastNr = 0x20, expectedNs = 0x00, lastNs=0x00, expectedNr = 0x20;
-time_t ts, te;
+time_t ts, te, totaltwr, totaltrd;
 
 void halarm(int signal)
 {
+    acounter++;
     printf("alarme # %d\n", acounter);
     aflag=1;
-    acounter++;
+    totalRetransmissions++;
 }
 
 int stAlarm(int timeout, int tries)
@@ -137,6 +138,7 @@ int llopen(linkLayer connectionParameters){
                 }
                 else{
                     printf("UA correctly recieved - 0x%02x%02x%02x%02x%02x\n", respbuf[0],respbuf[1],respbuf[2],respbuf[3],respbuf[4]);
+                    alarm(0);
                     return fdr;
                 }
             }
@@ -241,10 +243,10 @@ int llopen(linkLayer connectionParameters){
 }
 
 int llwrite(char* buf, int bufSize){
-    //Should be working (impossivel testar 4now pq falta resposta por parte do receiver), not tested. TO BE FINISHED!!!
-
+    
+    clock_t wrs, wre;
     printf("\n____LLWRITE____\n");
-
+    totalnumTrans++;
     //for now no message beyond 1000-6 bytes
     if(bufSize > 1000){
         printf("Buffer too big, sry.\n");
@@ -254,7 +256,7 @@ int llwrite(char* buf, int bufSize){
     unsigned char bcc2 = 0x00, frame[2048] = {0}, fresp[5] = {0};
     //clock_t fr_t, fre, wr_t, wre, s_t, e_t;
 
-    //fr_t = s_t = clock();
+    wrs = clock();
 
     frame[0] = 0x5C;
     frame[1] = 0x01;
@@ -341,6 +343,8 @@ int llwrite(char* buf, int bufSize){
                 //printf("0x%02x", lastNs);
                 expectedNr = expectedNr ^ 0x20;
                 totalbwr += byteCounter;
+                wre = clock();
+                totaltwr += wre-wrs;
                 //e_t = clock();
                 //printf("LLWRITE total time - %f\n", (float) (e_t-s_t)/CLOCKS_PER_SEC);
                 return bufSize;
@@ -357,34 +361,26 @@ int llwrite(char* buf, int bufSize){
         printf("Alarm reached max number of tries.\n");
         return -1;
     }
-
-    if(byteCounter < 1){
-        return -1;
-    } else { 
-        lastNs = lastNs ^ 0x02;
-        //printf("0x%02x", lastNs);
-        expectedNr = expectedNr ^ 0x20;
-        totalbwr += byteCounter;
-        //e_t = clock();
-        //printf("LLWRITE total time - %f\n", (float) (e_t-s_t)/CLOCKS_PER_SEC);
-        return bufSize;
-    }
 }
 
 int llread(char* packet){
 
     printf("\n____LLREAD____\n");
     //printf("\n%d\n", fdr);
-
+    totalnumReadcalls++;
     unsigned char suframe[5] = {0}, iframe[2048] = {0}, bcc2 = 0x00;
     int fsize = 0;
-    bool detect = TRUE, chunkread = FALSE, tryingtoread = TRUE; 
+    bool detect = TRUE, tryingtoread = TRUE; 
     STOP = FALSE;
     int rb, testb=0;
     int datasize;
     unsigned char reb[64] = {0};
     DLSM sm = START;
     int rejcounter = 0;
+    time_t rds, rde;
+
+    rds = clock();
+
 
     while(tryingtoread){
 
@@ -496,7 +492,7 @@ int llread(char* packet){
             //printf("0x%02x\n", bcc2);
         }
 
-        printf("0x%02x\n", bcc2);
+        //printf("0x%02x\n", bcc2);
 
         unsigned char bcccheck;
 
@@ -517,7 +513,7 @@ int llread(char* packet){
             suframe[3] = suframe[1] ^ suframe[2];
             suframe[4] = 0x5C;
             rejcounter++;
-            printf("ERROR DATA NOT CORRECT, BCC2 - 0x%02x - REJ SENT - 0x%02x%02x%02x%02x%02x\n", bcccheck, suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
+            printf("ERROR DATA NOT CORRECT, BCC2 EXPECTED - 0x%02x - REJ SENT - 0x%02x%02x%02x%02x%02x\n", bcccheck, suframe[0],suframe[1],suframe[2],suframe[3],suframe[4]);
             int wb = write(fdr, suframe, 5);
             if(rejcounter >= nT){
                 return -1;
@@ -550,6 +546,8 @@ int llread(char* packet){
             lastNr = (lastNr ^ 0x20);
             expectedNs = (expectedNs ^ 0x02);
             totalbrd += fsize;
+            rde = clock();
+            totaltrd += rde-rds;
             return datasize;
         }
         
@@ -558,17 +556,261 @@ int llread(char* packet){
     return -1;
 }
 
-int llclose(int showStatistics){
+int llclose(linkLayer connectionParameters, int showStatistics){
     te=clock();
-    printf("TOTAL TRANSFER TIME - %f\n", (float) (te-ts)/CLOCKS_PER_SEC);
+    //printf("TOTAL TRANSFER TIME - %f\n", (float) (te-ts)/CLOCKS_PER_SEC);
+    printf("____LLCLOSE____");
     
-    //can't use byteCounter para total de bytes, adaptar quando fizer transmissao de + do q 1 frame I
+    if (connectionParameters.role == TRANSMITTER){
+        
+        unsigned char frbuf[5] = {0}, respbuf[5] = {0};
 
-    // can't really do without knowing role, perguntar na aula
-    // Se eu der disconnect de um lado como é que dou do outro? É suposto admitir que só o transmissor inicia disconnects?
-    // Also, caso seja, dou close do lado do receiver no llread?
-    // To be done later depois de falar com a prof.
-    
-    
-    return 0;
+        frbuf[0] = 0x5C;
+        frbuf[1] = 0x01;
+        frbuf[2] = 0x0B;
+        frbuf[3] = 0x01 ^ 0x0B;
+        frbuf[4] = 0x5C;
+        acounter = 0;
+        aflag = 1;
+
+        while(acounter < connectionParameters.numTries){
+
+            if(aflag){
+                int rb = write(fdr, frbuf, sizeof(frbuf));
+                printf("DISC MESSAGE SENT, %d bytes were written.\n", rb);
+                stAlarm(connectionParameters.timeOut, connectionParameters.numTries);
+            }
+            
+
+            int rr = read(fdr, respbuf, 5);
+            if(rr != -1 && respbuf[0] == 0x5C){
+                if(respbuf[1] != 0x01 || respbuf[2] != 0x0B || respbuf[3] != (respbuf[1] ^ respbuf[2])){
+                    printf("DISC is wrong - 0x%02x%02x%02x%02x%02x\n", respbuf[0],respbuf[1],respbuf[2],respbuf[3],respbuf[4]);
+                }
+                else{
+                    printf("DISC correctly recieved - 0x%02x%02x%02x%02x%02x\n", respbuf[0],respbuf[1],respbuf[2],respbuf[3],respbuf[4]);
+                    alarm(0);
+                    break;
+                }
+            }
+            else if (rr == -1){
+                //printf("Waiting.\n");
+            }
+        }
+
+        if(acounter >= connectionParameters.numTries){
+            printf("Alarm reached max number of tries.\n");
+            return -1;
+        }
+
+        frbuf[0] = 0x5C;
+        frbuf[1] = 0x01;
+        frbuf[2] = 0x07;
+        frbuf[3] = 0x01 ^ 0x07;
+        frbuf[4] = 0x5C;
+        int rb = write(fdr, frbuf, sizeof(frbuf));
+        printf("UA MESSAGE SENT, %d bytes were written.\n", rb);
+
+        tcsetattr(fdr,TCSANOW,&oldtio);
+        close(fdr);
+
+        if(showStatistics){
+            te = clock();
+            printf("\n____STATISTICS____\n");
+            printf("Total bytes written - %lld\n", totalbwr);
+            float timewr = (float) totaltwr/CLOCKS_PER_SEC;
+            printf("Total time in llwrite - %f seconds\n", timewr);
+            printf("Average write time - %f seconds\n", timewr/totalnumTrans);
+            printf("Total number of retransmissions - %d\n", totalRetransmissions);
+            printf("Calculated writting rate - %lld bytes/sec\n", (long long int) (totalbwr / timewr));
+            printf("Total connection time - %f seconds\n", (float) (te-ts)/CLOCKS_PER_SEC);
+        }
+
+        return 0;
+
+    }
+    else if(connectionParameters.role == RECEIVER){
+        unsigned char frbuf[5] = {0}, reb[5] = {0};
+        DLSM sm = START;
+        int to_read =1;
+        STOP = FALSE;
+
+        while(STOP == FALSE){
+            if(to_read){
+                int rb = read(fdr, reb, 1);
+                if (rb <= 0) continue;
+            }
+
+
+            switch (sm){
+                case START:
+                    if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    break;
+
+                case FLAG_RCV:
+                    if(reb[0] == 0x01){
+                        sm = ADD_RCV;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case ADD_RCV:
+                    if(reb[0] == 0x0B){
+                        sm = C_RCV;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case C_RCV:
+                    if(reb[0] == (0x01 ^ 0x0B)){
+                        sm = BCC_OK;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case BCC_OK:
+                    if(reb[0] == 0x5C){
+                        sm = SMSTOP;
+                        to_read = 0;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case SMSTOP:
+                    STOP = TRUE;
+                    printf("DISC MESSAGE READ WITH SUCCESS\n");
+                    break;
+            }
+        }
+
+        frbuf[0] = 0x5C;
+        frbuf[1] = 0x01;
+        frbuf[2] = 0x0B;
+        frbuf[3] = frbuf[1] ^ frbuf[2];
+        frbuf[4] = 0x5C;
+
+        STOP = FALSE;
+        sm = START;
+        aflag = 1;
+        acounter = 0;
+
+        while(STOP == FALSE && acounter < connectionParameters.numTries){
+            if(!aflag){
+                int rb = read(fdr, reb, 1);
+                if (rb <= 0) continue;
+            }
+            else{
+                int rb = write(fdr, frbuf, sizeof(frbuf));
+                printf("DISC MESSAGE SENT, %d bytes were written.\n", rb);
+                stAlarm(connectionParameters.timeOut, connectionParameters.numTries);
+                continue;
+            }
+
+
+            switch (sm){
+                case START:
+                    if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    break;
+
+                case FLAG_RCV:
+                    if(reb[0] == 0x01){
+                        sm = ADD_RCV;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case ADD_RCV:
+                    if(reb[0] == 0x07){
+                        sm = C_RCV;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case C_RCV:
+                    if(reb[0] == (0x01 ^ 0x07)){
+                        sm = BCC_OK;
+                    }
+                    else if(reb[0] == 0x5C){
+                        sm = FLAG_RCV;
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case BCC_OK:
+                    if(reb[0] == 0x5C){
+                        sm = SMSTOP;
+                        to_read = 0;
+                        alarm(0);
+                        STOP = TRUE;
+                        printf("UA MESSAGE READ WITH SUCCESS\n");
+                    }
+                    else{
+                        sm = START;
+                    }
+                    break;
+
+                case SMSTOP:
+                    STOP = TRUE;
+                    printf("UA MESSAGE READ WITH SUCCESS\n");
+                    break;
+            }
+        }
+
+        if(acounter >= connectionParameters.numTries){
+            printf("Alarm reached max number of tries.\n");
+            return -1;
+        }
+
+        tcsetattr(fdr,TCSANOW,&oldtio);
+        close(fdr);
+
+        if(showStatistics){
+            te = clock();
+            printf("\n____STATISTICS____\n");
+            printf("Total bytes read - %lld\n", totalbrd);
+            float timerd = (float) totaltrd/CLOCKS_PER_SEC;
+            printf("Total time in llread - %f seconds\n", timerd);
+            printf("Average read time - %f seconds\n", timerd/totalnumReadcalls);
+            printf("Total number of failures reading data - %lld\n", totalnumFail);
+            printf("Calculated reading rate - %lld bytes/sec\n", (long long int) (totalbrd / timerd));
+            printf("Total connection time - %f seconds\n", (float) (te-ts)/CLOCKS_PER_SEC);
+        }
+
+        return 0;
+    }
+
+    return -1;
 }

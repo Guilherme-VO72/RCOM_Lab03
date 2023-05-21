@@ -24,7 +24,7 @@ typedef struct linkLayer{
 #define TRUE 1
 
 int aflag = TRUE;
-int acounter = 1;
+int acounter = 0;
 
 //ROLE
 #define NOT_DEFINED -1
@@ -49,7 +49,7 @@ int llwrite(char* buf, int bufSize);
 // Receive data in packet
 int llread(char* packet);
 // Closes previously opened connection; if showStatistics==TRUE, link layer should print statistics in the console on close
-int llclose(int showStatistics);
+int llclose(linkLayer connectionParameters, int showStatistics);
 
 typedef enum{
     tx,
